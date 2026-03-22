@@ -1,0 +1,55 @@
+{
+  "displayName": "KeyCRM → PostgreSQL Sync",
+  "trigger": {
+    "name": "schedule",
+    "displayName": "Every 4 Hours",
+    "type": "PIECE_TRIGGER",
+    "settings": {
+      "pieceName": "@activepieces/piece-schedule",
+      "pieceVersion": "0.1.0",
+      "triggerName": "cron_expression",
+      "input": {
+        "cronExpression": "0 */4 * * *"
+      }
+    },
+    "nextAction": {
+      "name": "fetch_orders",
+      "displayName": "Fetch KeyCRM Orders",
+      "type": "PIECE",
+      "settings": {
+        "pieceName": "@activepieces/piece-http",
+        "pieceVersion": "0.3.0",
+        "actionName": "send_request",
+        "input": {
+          "method": "GET",
+          "url": "{{configs.KEYCRM_BASE_URL}}/order?limit=50&page=1&sort=created_at&order=DESC",
+          "headers": {
+            "Authorization": "Bearer {{configs.KEYCRM_API_KEY}}",
+            "Content-Type": "application/json"
+          }
+        }
+      },
+      "nextAction": {
+        "name": "loop_orders",
+        "displayName": "Loop Over Orders",
+        "type": "LOOP_ON_ITEMS",
+        "settings": {
+          "items": "{{steps.fetch_orders.response.body.data}}"
+        },
+        "firstLoopAction": {
+          "name": "upsert_order",
+          "displayName": "Upsert Order to PostgreSQL",
+          "type": "PIECE",
+          "settings": {
+            "pieceName": "@activepieces/piece-postgresql",
+            "pieceVersion": "0.2.0",
+            "actionName": "execute_query",
+            "input": {
+              "query": "INSERT INTO keycrm_orders (id, status, source, total_price, currency, manager_id, buyer_id, created_at, updated_at, synced_at) VALUES ({{steps.loop_orders.item.id}}, '{{steps.loop_orders.item.status}}', '{{steps.loop_orders.item.source}}', {{steps.loop_orders.item.total_price}}, '{{steps.loop_orders.item.currency}}', {{steps.loop_orders.item.manager_id}}, {{steps.loop_orders.item.buyer_id}}, '{{steps.loop_orders.item.created_at}}', '{{steps.loop_orders.item.updated_at}}', NOW()) ON CONFLICT (id) DO UPDATE SET status = EXCLUDED.status, total_price = EXCLUDED.total_price, updated_at = EXCLUDED.updated_at, synced_at = NOW()"
+            }
+          }
+        }
+      }
+    }
+  }
+}
